@@ -1,6 +1,6 @@
 /**
  * filters.js - Anti-Bias and Market Quality Filters
- * Implements all 8 accuracy rules for signal filtering
+ * Implements accuracy rules for signal filtering with balanced settings
  */
 
 const technicalIndicators = require('technicalindicators');
@@ -10,6 +10,8 @@ const CRYPTO_PAIRS = ['BTC/USD', 'BTCUSD', 'ETH/USD', 'ETHUSD'];
 
 /**
  * Checks if current UTC time is within active trading sessions
+ * London: 06:00-17:00 UTC
+ * New York: 12:00-22:00 UTC
  * @returns {Object} - { isActive: boolean, bonus: number }
  */
 function isMarketSession() {
@@ -18,13 +20,13 @@ function isMarketSession() {
     const utcMinute = now.getUTCMinutes();
     const currentMinutes = utcHour * 60 + utcMinute;
 
-    // London session: 07:00-16:00 UTC
-    const LONDON_START = 7 * 60;
-    const LONDON_END = 16 * 60;
+    // London session: 06:00-17:00 UTC (generous window)
+    const LONDON_START = 6 * 60;
+    const LONDON_END = 17 * 60;
 
-    // New York session: 13:00-21:00 UTC
-    const NY_START = 13 * 60;
-    const NY_END = 21 * 60;
+    // New York session: 12:00-22:00 UTC (generous window)
+    const NY_START = 12 * 60;
+    const NY_END = 22 * 60;
 
     const inLondon = currentMinutes >= LONDON_START && currentMinutes < LONDON_END;
     const inNY = currentMinutes >= NY_START && currentMinutes < NY_END;
@@ -38,6 +40,7 @@ function isMarketSession() {
 /**
  * Checks if market is ranging (too tight for signals)
  * Uses Bollinger Band width calculation
+ * Threshold: 0.05% (relaxed from 0.1%)
  * @param {Array} candles - Array of candle objects
  * @returns {Object} - { isRanging: boolean, bandWidth: number }
  */
@@ -63,8 +66,8 @@ function detectRangingMarket(candles) {
         const lastBB = bb[bb.length - 1];
         const bandWidth = ((lastBB.upper - lastBB.lower) / lastBB.middle) * 100;
 
-        // If bandwidth < 0.1%, market is ranging
-        const isRanging = bandWidth < 0.1;
+        // Ranging only if bandwidth < 0.05% (very tight consolidation)
+        const isRanging = bandWidth < 0.05;
 
         console.log(`[FILTERS] Bollinger Band Width: ${bandWidth.toFixed(4)}% (Ranging: ${isRanging})`);
 
@@ -77,7 +80,7 @@ function detectRangingMarket(candles) {
 
 /**
  * Checks for consecutive signal bias (Rule 1)
- * Prevents 3+ same direction signals in a row
+ * Prevents 5+ same direction signals in a row (relaxed from 3)
  * @param {string} pair - Trading pair
  * @param {string} direction - Proposed signal direction
  * @param {Object} state - State module reference
@@ -87,8 +90,8 @@ function checkConsecutiveBias(pair, direction, state) {
     try {
         const consecutive = state.getConsecutiveCount(pair);
 
-        // If we have 3+ consecutive same direction, block signal
-        if (consecutive.direction === direction && consecutive.count >= 3) {
+        // Block only after 5+ consecutive same direction (relaxed threshold)
+        if (consecutive.direction === direction && consecutive.count >= 5) {
             console.log(`[FILTERS] BLOCKED: Consecutive bias detected (${direction} x${consecutive.count})`);
             return true;
         }
@@ -102,7 +105,9 @@ function checkConsecutiveBias(pair, direction, state) {
 
 /**
  * Checks RSI exhaustion levels (Rule 2)
- * Prevents signals in extreme overbought/oversold
+ * Blocks opposite signals in extreme RSI zones
+ * RSI < 20: block DOWN (relaxed from 25)
+ * RSI > 80: block UP (relaxed from 75)
  * @param {number} rsiValue - RSI value
  * @returns {Object} - { status: string, canTrade: boolean }
  */
@@ -112,12 +117,12 @@ function checkRSIExhaustion(rsiValue) {
     }
 
     // Extreme exhaustion - potential reversal zones
-    if (rsiValue < 25) {
+    if (rsiValue < 20) {
         console.log(`[FILTERS] RSI Exhausted Down: ${rsiValue.toFixed(2)} (blocking DOWN signals)`);
         return { status: 'EXHAUSTED_DOWN', canTrade: true, blockDirection: 'DOWN' };
     }
 
-    if (rsiValue > 75) {
+    if (rsiValue > 80) {
         console.log(`[FILTERS] RSI Exhausted Up: ${rsiValue.toFixed(2)} (blocking UP signals)`);
         return { status: 'EXHAUSTED_UP', canTrade: true, blockDirection: 'UP' };
     }
@@ -267,6 +272,7 @@ function isDojiCandle(candles) {
 
 /**
  * Applies session penalty for forex pairs outside market hours
+ * Outside session: -5 points (relaxed from -15)
  * @param {string} pair - Trading pair name
  * @param {boolean} isActiveSession - Whether market is active
  * @returns {number} - Penalty points (negative)
@@ -279,8 +285,8 @@ function getSessionPenalty(pair, isActiveSession) {
         return 0;
     }
 
-    // Forex outside session gets -15 penalty
-    return isActiveSession ? 0 : -15;
+    // Forex outside session gets -5 penalty (relaxed)
+    return isActiveSession ? 0 : -5;
 }
 
 /**

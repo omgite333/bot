@@ -1,7 +1,17 @@
 /**
  * strategy.js - Core Signal Generation Engine
- * Generates trading signals using 6 technical indicators and 8 accuracy rules
+ * Generates trading signals using 6 technical indicators with balanced accuracy rules
  */
+
+// Balanced threshold constants
+const THRESHOLDS = {
+    STRONG_SIGNAL: 60,      // Score >= 60 = STRONG (was 75)
+    WEAK_SIGNAL: 45,        // Score 45-59 = WEAK (was 55)
+    MIN_INDICATORS: 3,      // At least 3 out of 6 must agree
+    RANGING_SCORE: 70,      // Ranging 5min needs 70+ score (relaxed from 80)
+    CONSECUTIVE_BLOCK: 40,  // Consecutive bias max score (relaxed from 40)
+    EXHAUSTION_MAX: 50     // Exhaustion block max score (relaxed from 50)
+};
 
 const technicalIndicators = require('technicalindicators');
 const filters = require('./filters');
@@ -46,7 +56,7 @@ function generateSignal(candles1m, candles5m, pair) {
         return result;
     }
 
-    // STEP 2: Check consecutive bias (Rule 1)
+    // STEP 2: Check consecutive bias (Rule 1) - block after 5 same signals
     const isBiased = filters.checkConsecutiveBias(pair, 'UP', state) || 
                      filters.checkConsecutiveBias(pair, 'DOWN', state);
     result.filters.consecutiveBias = isBiased;
@@ -54,10 +64,6 @@ function generateSignal(candles1m, candles5m, pair) {
     // STEP 3: Get 5-minute trend
     const trend5m = filters.getMarketTrend5m(candles5m);
     result.filters.trend5m = trend5m.trend;
-
-    // STEP 6: Check for reversal (Rule 5)
-    const reversalDetected = filters.detectReversal(candles1m, null); // Will update after RSI
-    result.filters.reversalDetected = !!reversalDetected;
 
     // STEP 4: Calculate all indicators
     const rsiResult = calculateRSI(closingPrices);
@@ -67,10 +73,12 @@ function generateSignal(candles1m, candles5m, pair) {
     const bbResult = calculateBollingerBands(closingPrices);
     const patternResult = detectCandlePattern(candles1m);
 
-    // Update reversal with RSI value
-    result.filters.reversalDetected = !!reversalDetected || !!filters.detectReversal(candles1m, rsiResult.value);
+    // Check for reversal (Rule 5)
+    const reversalDetected = filters.detectReversal(candles1m, rsiResult.value);
+    result.filters.reversalDetected = !!reversalDetected;
 
     // STEP 5: Check RSI exhaustion (Rule 2)
+    // RSI < 20 blocks DOWN, RSI > 80 blocks UP (relaxed from 25/75)
     const exhaustion = filters.checkRSIExhaustion(rsiResult.value);
 
     // STEP 6: Check doji candle (Rule 6)
@@ -88,32 +96,51 @@ function generateSignal(candles1m, candles5m, pair) {
 
     // Calculate total score
     let totalScore = 0;
-    let baseIndicators = 0;
-    let bonusIndicators = 0;
+    let agreeingIndicators = 0;
+    let currentDirection = 'WAIT';
+
+    // Collect all indicator signals for direction determination
+    const indicatorSignals = [
+        rsiResult.signal,
+        emaResult.signal,
+        macdResult.signal,
+        stochResult.signal,
+        bbResult.signal,
+        patternResult.signal
+    ];
+
+    // Count how many agree on a direction
+    const upSignals = indicatorSignals.filter(s => s === 'UP').length;
+    const downSignals = indicatorSignals.filter(s => s === 'DOWN').length;
+
+    // Determine overall direction based on majority
+    if (upSignals > downSignals && upSignals >= THRESHOLDS.MIN_INDICATORS) {
+        currentDirection = 'UP';
+        agreeingIndicators = upSignals;
+    } else if (downSignals > upSignals && downSignals >= THRESHOLDS.MIN_INDICATORS) {
+        currentDirection = 'DOWN';
+        agreeingIndicators = downSignals;
+    }
 
     // BASE INDICATORS (max 60 points)
     
     // RSI (15 points max)
     if (rsiResult.points > 0) {
-        baseIndicators += rsiResult.points;
         totalScore += rsiResult.points;
     }
 
     // EMA crossover (15 points max)
     if (emaResult.points > 0) {
-        baseIndicators += emaResult.points;
         totalScore += emaResult.points;
     }
 
     // MACD (15 points max)
     if (macdResult.points > 0) {
-        baseIndicators += macdResult.points;
         totalScore += macdResult.points;
     }
 
     // Stochastic RSI (15 points max)
     if (stochResult.points > 0) {
-        baseIndicators += stochResult.points;
         totalScore += stochResult.points;
     }
 
@@ -121,19 +148,16 @@ function generateSignal(candles1m, candles5m, pair) {
     
     // Bollinger Bands (10 points)
     if (bbResult.points > 0) {
-        bonusIndicators += bbResult.points;
         totalScore += bbResult.points;
     }
 
     // Candle pattern (10 points)
     if (patternResult.points > 0) {
-        bonusIndicators += patternResult.points;
         totalScore += patternResult.points;
     }
 
     // 5min trend alignment (15 points)
     if (trend5m.bonus > 0) {
-        bonusIndicators += trend5m.bonus;
         totalScore += trend5m.bonus;
     }
 
@@ -141,32 +165,32 @@ function generateSignal(candles1m, candles5m, pair) {
     const session = filters.isMarketSession();
     result.filters.marketSession = session.isActive;
     if (session.bonus > 0) {
-        bonusIndicators += session.bonus;
         totalScore += session.bonus;
     }
 
-    // STEP 9: Apply penalties
+    // STEP 7: Apply penalties
 
     // Trend alignment penalty (Rule 3)
     let trendPenalty = 0;
-    if (result.direction !== 'WAIT') {
-        if (trend5m.trend === 'UPTREND' && result.direction === 'DOWN') {
-            trendPenalty = -15;
+    if (currentDirection !== 'WAIT') {
+        if (trend5m.trend === 'UPTREND' && currentDirection === 'DOWN') {
+            trendPenalty = -10; // Reduced penalty (was -15)
             console.log('[STRATEGY] PENALTY: Signal against 5min UPTREND');
-        } else if (trend5m.trend === 'DOWNTREND' && result.direction === 'UP') {
-            trendPenalty = -15;
+        } else if (trend5m.trend === 'DOWNTREND' && currentDirection === 'UP') {
+            trendPenalty = -10; // Reduced penalty (was -15)
             console.log('[STRATEGY] PENALTY: Signal against 5min DOWNTREND');
         }
         totalScore += trendPenalty;
     }
 
-    // Doji penalty (Rule 6)
+    // Doji penalty (Rule 6) - reduced penalty
     if (isDoji) {
-        totalScore -= 10;
+        totalScore -= 5; // Reduced from -10
         console.log('[STRATEGY] PENALTY: Doji candle detected');
     }
 
     // Session penalty for forex outside hours (Rule 8)
+    // Outside session: -5 points (relaxed from -15)
     const sessionPenalty = filters.getSessionPenalty(pair, session.isActive);
     totalScore += sessionPenalty;
     if (sessionPenalty < 0) {
@@ -174,51 +198,50 @@ function generateSignal(candles1m, candles5m, pair) {
     }
 
     // STEP 8: Apply RSI exhaustion blocks (Rule 2)
-    if (exhaustion.status === 'EXHAUSTED_DOWN' && result.direction === 'DOWN') {
-        result.direction = 'WAIT';
-        totalScore = Math.min(totalScore, 50);
+    // RSI < 20 blocks DOWN, RSI > 80 blocks UP (relaxed from 25/75)
+    if (exhaustion.status === 'EXHAUSTED_DOWN' && currentDirection === 'DOWN') {
+        currentDirection = 'WAIT';
+        totalScore = Math.min(totalScore, THRESHOLDS.EXHAUSTION_MAX);
         console.log('[STRATEGY] BLOCKED: RSI exhaustion - DOWN blocked');
     }
 
-    if (exhaustion.status === 'EXHAUSTED_UP' && result.direction === 'UP') {
-        result.direction = 'WAIT';
-        totalScore = Math.min(totalScore, 50);
+    if (exhaustion.status === 'EXHAUSTED_UP' && currentDirection === 'UP') {
+        currentDirection = 'WAIT';
+        totalScore = Math.min(totalScore, THRESHOLDS.EXHAUSTION_MAX);
         console.log('[STRATEGY] BLOCKED: RSI exhaustion - UP blocked');
     }
 
-    // High confidence required for ranging 5min
-    if (trend5m.trend === 'RANGING' && result.direction !== 'WAIT') {
-        if (totalScore < 80) {
-            result.direction = 'WAIT';
-            console.log('[STRATEGY] BLOCKED: Ranging 5min, requires 80+ score');
+    // Relaxed ranging 5min requirement (70+ instead of 80+)
+    if (trend5m.trend === 'RANGING' && currentDirection !== 'WAIT') {
+        if (totalScore < THRESHOLDS.RANGING_SCORE) {
+            currentDirection = 'WAIT';
+            console.log(`[STRATEGY] BLOCKED: Ranging 5min, requires ${THRESHOLDS.RANGING_SCORE}+ score`);
         }
+    }
+
+    // STEP 9: Apply reversal override (Rule 5)
+    if (reversalDetected) {
+        currentDirection = reversalDetected;
+        totalScore = Math.min(100, totalScore + 20); // Reversal bonus
+        console.log(`[STRATEGY] REVERSAL OVERRIDE: ${reversalDetected}`);
+    }
+
+    // Apply consecutive bias filter (5+ same signals blocks)
+    if (isBiased) {
+        currentDirection = 'WAIT';
+        totalScore = Math.min(totalScore, THRESHOLDS.CONSECUTIVE_BLOCK);
+        console.log('[STRATEGY] BLOCKED: Consecutive bias (5+ same signals)');
     }
 
     // STEP 10: Determine final direction and strength
-    // If reversal detected, it overrides
-    if (result.filters.reversalDetected) {
-        // Determine reversal direction
-        const reversal = filters.detectReversal(candles1m, rsiResult.value);
-        if (reversal) {
-            result.direction = reversal;
-            totalScore = Math.min(100, totalScore + 20); // Reversal bonus
-            console.log(`[STRATEGY] REVERSAL OVERRIDE: ${reversal}`);
-        }
-    }
-
-    // Apply consecutive bias filter
-    if (isBiased) {
-        result.direction = 'WAIT';
-        totalScore = Math.min(totalScore, 40);
-        console.log('[STRATEGY] BLOCKED: Consecutive bias (3+ same signals)');
-    }
-
-    // Final direction based on scoring
-    if (result.direction === 'WAIT') {
+    // Balanced thresholds: >=60 STRONG, 45-59 WEAK, <45 WAIT
+    result.direction = currentDirection;
+    
+    if (currentDirection === 'WAIT') {
         result.strength = 'WAIT';
-    } else if (totalScore >= 75) {
+    } else if (totalScore >= THRESHOLDS.STRONG_SIGNAL) {
         result.strength = 'STRONG';
-    } else if (totalScore >= 55) {
+    } else if (totalScore >= THRESHOLDS.WEAK_SIGNAL) {
         result.strength = 'WEAK';
     } else {
         result.direction = 'WAIT';
@@ -236,6 +259,7 @@ function generateSignal(candles1m, candles5m, pair) {
     }
 
     console.log(`\n[STRATEGY] FINAL: ${result.direction} | ${result.strength} | ${result.confidence}%`);
+    console.log(`[STRATEGY] Agreeing indicators: ${agreeingIndicators}/6`);
     console.log(`${'='.repeat(60)}\n`);
 
     // Update state with new signal

@@ -38,10 +38,24 @@ const SUPPORTED_PAIRS = [
     { id: 'EURUSD_OTC', name: 'EUR/USD (OTC)', symbol: 'EURUSD_OTC' }
 ];
 
+const PAIR_BASE_PRICES = {
+    'EURUSD': 1.0850,
+    'GBPUSD': 1.2650,
+    'USDJPY': 149.50,
+    'AUDUSD': 0.6550,
+    'EURGBP': 0.8580,
+    'USDCAD': 1.3650,
+    'EURJPY': 162.20,
+    'BTCUSD': 67500,
+    'ETHUSD': 3450,
+    'EURUSD_OTC': 1.0840
+};
+
 let activePair = 'EURUSD';
 let isRunning = false;
 let signalLoopInterval = null;
 let currentSignal = null;
+let demoModeTimeout = null;
 
 app.use(cors());
 app.use(express.json());
@@ -89,6 +103,7 @@ app.get('/status', (req, res) => {
     res.json({
         success: true,
         wsStatus,
+        isDemo: wsStatus === 'DEMO',
         candleCount: candleData[activePair] || 0,
         activePair,
         isRunning
@@ -106,7 +121,12 @@ quotexWS.onTick((tick) => {
 });
 
 quotexWS.onStatusChange((status) => {
+    console.log(`[SERVER] WS Status changed: ${status}`);
     io.emit('ws_status', status);
+    
+    if (status === 'DEMO') {
+        console.log('[SERVER] Running in DEMO mode with simulated data');
+    }
 });
 
 io.on('connection', (socket) => {
@@ -124,6 +144,7 @@ io.on('connection', (socket) => {
         if (activePair !== newPair) {
             quotexWS.unsubscribe(activePair);
             state.resetPair(activePair);
+            candleBuilder.clearCandles(activePair);
             activePair = newPair;
             quotexWS.subscribe(newPair);
         }
@@ -182,6 +203,13 @@ function stopSignalLoop() {
 quotexWS.connect();
 quotexWS.subscribe(activePair);
 
+demoModeTimeout = setTimeout(() => {
+    if (quotexWS.getConnectionStatus() !== 'CONNECTED') {
+        console.log('[SERVER] WebSocket not connected after 10s, enabling demo mode...');
+        quotexWS.enableDemoMode(true);
+    }
+}, 10000);
+
 startSignalLoop();
 
 server.listen(PORT, () => {
@@ -189,7 +217,6 @@ server.listen(PORT, () => {
     console.log('QUOTEX AI SIGNAL BOT');
     console.log('='.repeat(50));
     console.log(`Server running on port ${PORT}`);
-    console.log(`WebSocket connecting to Quotex...`);
     console.log(`Default pair: ${activePair}`);
     console.log(`Signal interval: 60 seconds`);
     console.log(`Socket.io ready for connections`);
@@ -200,6 +227,7 @@ process.on('SIGTERM', () => {
     console.log('[SERVER] Shutting down...');
     stopSignalLoop();
     quotexWS.disconnect();
+    if (demoModeTimeout) clearTimeout(demoModeTimeout);
     process.exit(0);
 });
 
@@ -207,6 +235,7 @@ process.on('SIGINT', () => {
     console.log('[SERVER] Shutting down...');
     stopSignalLoop();
     quotexWS.disconnect();
+    if (demoModeTimeout) clearTimeout(demoModeTimeout);
     process.exit(0);
 });
 

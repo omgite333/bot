@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quotex Signal Bot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,79 +11,184 @@
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <header class="header">
             <h1>🤖 QUOTEX SIGNAL BOT</h1>
-            <p class="subtitle">Technical Analysis Trading Signals</p>
+            <p class="subtitle">Strategy-Based Signal Engine</p>
+            <div class="clock">
+                <span class="clock-icon">🕐</span>
+                <span id="utcClock">00:00:00</span>
+                <span class="clock-label">UTC</span>
+            </div>
         </header>
 
-        <div class="controls">
-            <div class="select-wrapper">
+        <!-- Control Panel -->
+        <section class="control-panel">
+            <div class="pair-selector">
                 <label for="pairSelect">Trading Pair</label>
                 <select id="pairSelect">
                     <option value="">Select a pair...</option>
                 </select>
             </div>
-            <div class="button-group">
-                <button id="startBtn" class="btn btn-start">▶ START</button>
-                <button id="stopBtn" class="btn btn-stop" disabled>⏹ STOP</button>
+            <div class="control-buttons">
+                <button id="startBtn" class="btn btn-start">
+                    <span class="btn-icon">▶</span> START
+                </button>
+                <button id="stopBtn" class="btn btn-stop" disabled>
+                    <span class="btn-icon">⏹</span> STOP
+                </button>
             </div>
-        </div>
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot"></span>
+                <span id="statusText">STOPPED</span>
+            </div>
+        </section>
 
-        <div class="signal-display" id="signalDisplay">
-            <div class="signal-box" id="signalBox">
-                <span id="signalText">WAIT</span>
+        <!-- Main Signal Card -->
+        <section class="signal-card" id="signalCard">
+            <div class="signal-direction">
+                <span class="direction-icon" id="directionIcon">⏸</span>
+                <span class="direction-text" id="directionText">WAIT</span>
             </div>
-            <div class="confidence-container">
-                <label>Confidence: <span id="confidenceValue">0%</span></label>
+            <div class="signal-strength" id="signalStrength">
+                <span class="strength-badge">WAIT</span>
+            </div>
+            <div class="confidence-display">
+                <div class="confidence-value" id="confidenceValue">0%</div>
+                <div class="confidence-label">Confidence</div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="confidenceFill"></div>
                 </div>
             </div>
-        </div>
-
-        <div class="timer-section">
-            <div class="timer-box">
-                <span class="timer-label">Next signal in:</span>
-                <span class="timer-value" id="countdown">0:00</span>
+            <div class="signal-meta">
+                <div class="meta-item">
+                    <span class="meta-label">Pair</span>
+                    <span class="meta-value" id="signalPair">--</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Time</span>
+                    <span class="meta-value" id="signalTime">--:--:--</span>
+                </div>
             </div>
-            <div class="status-indicator" id="statusIndicator">
-                <span class="status-dot"></span>
-                <span id="statusText">Idle</span>
+            <div class="countdown-display">
+                <span class="countdown-label">Next signal in:</span>
+                <span class="countdown-value" id="countdownValue">0:00</span>
             </div>
-        </div>
+        </section>
 
-        <div class="indicators-section">
-            <h2>📊 Indicators Breakdown</h2>
-            <div class="indicators-grid">
-                <div class="indicator-card" id="rsiCard">
-                    <div class="indicator-header">
+        <!-- Indicators Breakdown -->
+        <section class="indicators-card">
+            <h2 class="card-title">📊 Indicator Analysis</h2>
+            <div class="indicators-list">
+                <div class="indicator-row" id="rsiRow">
+                    <div class="indicator-info">
                         <span class="indicator-name">RSI (14)</span>
-                        <span class="indicator-status" id="rsiStatus">❌</span>
+                        <span class="indicator-value" id="rsiValue">--</span>
                     </div>
-                    <div class="indicator-value" id="rsiValue">--</div>
-                    <div class="indicator-detail" id="rsiDetail">Waiting...</div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="rsiStatus">❌</span>
+                        <span class="status-text" id="rsiStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="rsiPoints">+0</div>
                 </div>
-                <div class="indicator-card" id="emaCard">
-                    <div class="indicator-header">
-                        <span class="indicator-name">EMA (9/21)</span>
-                        <span class="indicator-status" id="emaStatus">❌</span>
+                <div class="indicator-row" id="emaRow">
+                    <div class="indicator-info">
+                        <span class="indicator-name">EMA Cross</span>
+                        <span class="indicator-value" id="emaValue">-- / --</span>
                     </div>
-                    <div class="indicator-value" id="emaValue">--</div>
-                    <div class="indicator-detail" id="emaDetail">Waiting...</div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="emaStatus">❌</span>
+                        <span class="status-text" id="emaStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="emaPoints">+0</div>
                 </div>
-                <div class="indicator-card" id="macdCard">
-                    <div class="indicator-header">
-                        <span class="indicator-name">MACD (12/26/9)</span>
-                        <span class="indicator-status" id="macdStatus">❌</span>
+                <div class="indicator-row" id="macdRow">
+                    <div class="indicator-info">
+                        <span class="indicator-name">MACD</span>
+                        <span class="indicator-value" id="macdValue">-- / --</span>
                     </div>
-                    <div class="indicator-value" id="macdValue">--</div>
-                    <div class="indicator-detail" id="macdDetail">Waiting...</div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="macdStatus">❌</span>
+                        <span class="status-text" id="macdStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="macdPoints">+0</div>
+                </div>
+                <div class="indicator-row" id="stochRow">
+                    <div class="indicator-info">
+                        <span class="indicator-name">Stoch RSI</span>
+                        <span class="indicator-value" id="stochValue">--</span>
+                    </div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="stochStatus">❌</span>
+                        <span class="status-text" id="stochStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="stochPoints">+0</div>
+                </div>
+                <div class="indicator-row" id="bbRow">
+                    <div class="indicator-info">
+                        <span class="indicator-name">Bollinger</span>
+                        <span class="indicator-value" id="bbValue">--</span>
+                    </div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="bbStatus">❌</span>
+                        <span class="status-text" id="bbStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="bbPoints">+0</div>
+                </div>
+                <div class="indicator-row" id="patternRow">
+                    <div class="indicator-info">
+                        <span class="indicator-name">Candle</span>
+                        <span class="indicator-value" id="patternValue">--</span>
+                    </div>
+                    <div class="indicator-status">
+                        <span class="status-indicator" id="patternStatus">❌</span>
+                        <span class="status-text" id="patternStatusText">Waiting</span>
+                    </div>
+                    <div class="indicator-points" id="patternPoints">+0</div>
                 </div>
             </div>
-        </div>
+            <div class="score-total">
+                <span class="score-label">Total Score</span>
+                <span class="score-value" id="totalScore">0 / 100</span>
+            </div>
+        </section>
 
-        <div class="history-section">
-            <h2>📜 Signal History</h2>
+        <!-- Market Context Card -->
+        <section class="context-card">
+            <h2 class="card-title">🌐 Market Context</h2>
+            <div class="context-grid">
+                <div class="context-item">
+                    <span class="context-label">5min Trend</span>
+                    <span class="context-value" id="trend5mValue">
+                        <span class="trend-arrow">→</span>
+                        <span class="trend-text">RANGING</span>
+                    </span>
+                </div>
+                <div class="context-item">
+                    <span class="context-label">Market Session</span>
+                    <span class="context-value" id="sessionValue">
+                        <span class="session-dot inactive"></span>
+                        <span class="session-text">INACTIVE</span>
+                    </span>
+                </div>
+                <div class="context-item">
+                    <span class="context-label">Ranging</span>
+                    <span class="context-value" id="rangingValue">
+                        <span class="ranging-text">NO</span>
+                    </span>
+                </div>
+                <div class="context-item">
+                    <span class="context-label">Reversal</span>
+                    <span class="context-value" id="reversalValue">
+                        <span class="reversal-text">NO</span>
+                    </span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Signal History -->
+        <section class="history-card">
+            <h2 class="card-title">📜 Signal History</h2>
             <div class="table-wrapper">
                 <table class="history-table">
                     <thead>
@@ -91,20 +196,28 @@
                             <th>Time</th>
                             <th>Pair</th>
                             <th>Signal</th>
-                            <th>Confidence</th>
+                            <th>Str</th>
+                            <th>Conf</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody">
                         <tr class="empty-row">
-                            <td colspan="4">No signals yet. Start the bot to see signals.</td>
+                            <td colspan="5">No signals yet. Start the bot to see signals.</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+        </section>
+
+        <!-- Error Banner -->
+        <div class="error-banner" id="errorBanner">
+            <span class="error-icon">⚠️</span>
+            <span class="error-message" id="errorMessage">Error message here</span>
         </div>
 
+        <!-- Footer -->
         <footer class="footer">
-            <p>⚠️ Trading signals are for educational purposes only. Trade responsibly.</p>
+            <p>⚠️ For educational purposes only. Trade responsibly.</p>
         </footer>
     </div>
 

@@ -1,7 +1,7 @@
 {
   "name": "quotex-signal-bot",
   "version": "1.0.0",
-  "description": "A web app that shows continuous trading signals (UP/DOWN) every 1 minute for Quotex trading platform",
+  "description": "Strategy-based trading signal bot for Quotex with multi-indicator analysis",
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
@@ -11,8 +11,10 @@
     "quotex",
     "trading",
     "signals",
-    "bot",
-    "technical-analysis"
+    "technical-analysis",
+    "rsi",
+    "ema",
+    "macd"
   ],
   "author": "",
   "license": "MIT",
@@ -22,5 +24,8 @@
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
     "technicalindicators": "^3.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }

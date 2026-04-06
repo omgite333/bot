@@ -1,110 +1,258 @@
+/**
+ * strategy.js - Core Signal Generation Engine
+ * Generates trading signals using 6 technical indicators and 8 accuracy rules
+ */
+
 const technicalIndicators = require('technicalindicators');
+const filters = require('./filters');
+const state = require('./state');
+
+// Minimum candles required for reliable calculation
+const MIN_CANDLES = 30;
 
 /**
- * Generate trading signal based on RSI, EMA, and MACD indicators
- * @param {Array} candles - Array of 50 candle objects with OHLCV data
- * @returns {Object} - Signal object with direction, confidence, and indicator details
+ * Main signal generation function
+ * Orchestrates all indicators, filters, and rules
+ * @param {Array} candles1m - 1-minute candles
+ * @param {Array} candles5m - 5-minute candles
+ * @param {string} pair - Trading pair name
+ * @returns {Object} - Complete signal object
  */
-function generateSignal(candles) {
-    if (!candles || candles.length < 50) {
-        return {
-            direction: 'WAIT',
-            confidence: 0,
-            error: 'Insufficient candle data',
-            indicators: {
-                rsi: { value: null, signal: 'NEUTRAL' },
-                ema: { ema9: null, ema21: null, signal: 'NEUTRAL' },
-                macd: { macd: null, signal_line: null, signal: 'NEUTRAL' }
-            }
-        };
+function generateSignal(candles1m, candles5m, pair) {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[STRATEGY] Generating signal for ${pair}`);
+    console.log(`${'='.repeat(60)}`);
+
+    const timestamp = new Date().toISOString();
+    const result = createEmptySignal(pair, timestamp);
+
+    // RULE 7: Minimum data check
+    if (!filters.hasMinimumData(candles1m, MIN_CANDLES)) {
+        console.log('[STRATEGY] FAIL: Insufficient 1min data');
+        result.filters = getFilterStatus(candles1m, candles5m, pair);
+        return result;
     }
 
-    const closingPrices = candles.map(c => c.close);
+    // Get closing prices for 1m candles
+    const closingPrices = candles1m.map(c => c.close);
 
+    // STEP 1: Check ranging market (Rule 4)
+    const rangingCheck = filters.detectRangingMarket(candles1m);
+    result.filters.isRanging = rangingCheck.isRanging;
+    
+    if (rangingCheck.isRanging) {
+        console.log('[STRATEGY] FAIL: Market is ranging');
+        result.filters = getFilterStatus(candles1m, candles5m, pair);
+        return result;
+    }
+
+    // STEP 2: Check consecutive bias (Rule 1)
+    const isBiased = filters.checkConsecutiveBias(pair, 'UP', state) || 
+                     filters.checkConsecutiveBias(pair, 'DOWN', state);
+    result.filters.consecutiveBias = isBiased;
+
+    // STEP 3: Get 5-minute trend
+    const trend5m = filters.getMarketTrend5m(candles5m);
+    result.filters.trend5m = trend5m.trend;
+
+    // STEP 6: Check for reversal (Rule 5)
+    const reversalDetected = filters.detectReversal(candles1m, null); // Will update after RSI
+    result.filters.reversalDetected = !!reversalDetected;
+
+    // STEP 4: Calculate all indicators
     const rsiResult = calculateRSI(closingPrices);
     const emaResult = calculateEMA(closingPrices);
     const macdResult = calculateMACD(closingPrices);
+    const stochResult = calculateStochasticRSI(closingPrices);
+    const bbResult = calculateBollingerBands(closingPrices);
+    const patternResult = detectCandlePattern(candles1m);
 
-    let confidence = 0;
-    let direction = 'WAIT';
-    let agreementCount = 0;
+    // Update reversal with RSI value
+    result.filters.reversalDetected = !!reversalDetected || !!filters.detectReversal(candles1m, rsiResult.value);
 
-    const rsiSignal = rsiResult.signal;
-    const emaSignal = emaResult.signal;
-    const macdSignal = macdResult.signal;
+    // STEP 5: Check RSI exhaustion (Rule 2)
+    const exhaustion = filters.checkRSIExhaustion(rsiResult.value);
 
-    if (rsiSignal === 'UP') {
-        confidence += 33;
-        agreementCount++;
-    } else if (rsiSignal === 'DOWN') {
-        confidence += 33;
-        agreementCount++;
-    }
+    // STEP 6: Check doji candle (Rule 6)
+    const isDoji = filters.isDojiCandle(candles1m);
 
-    if (emaSignal === 'UP') {
-        confidence += 33;
-        agreementCount++;
-    } else if (emaSignal === 'DOWN') {
-        confidence += 33;
-        agreementCount++;
-    }
-
-    if (macdSignal === 'UP') {
-        confidence += 34;
-        agreementCount++;
-    } else if (macdSignal === 'DOWN') {
-        confidence += 34;
-        agreementCount++;
-    }
-
-    if (agreementCount >= 2) {
-        const upCount = [rsiSignal, emaSignal, macdSignal].filter(s => s === 'UP').length;
-        const downCount = [rsiSignal, emaSignal, macdSignal].filter(s => s === 'DOWN').length;
-        
-        if (upCount > downCount) {
-            direction = 'UP';
-        } else if (downCount > upCount) {
-            direction = 'DOWN';
-        } else {
-            direction = 'WAIT';
-            confidence = Math.min(confidence, 50);
-        }
-    }
-
-    if (agreementCount < 2) {
-        direction = 'WAIT';
-        confidence = Math.min(confidence, 33);
-    }
-
-    confidence = Math.min(confidence, 100);
-
-    return {
-        direction: direction,
-        confidence: confidence,
-        indicators: {
-            rsi: {
-                value: rsiResult.value,
-                signal: rsiSignal
-            },
-            ema: {
-                ema9: emaResult.ema9,
-                ema21: emaResult.ema21,
-                signal: emaSignal
-            },
-            macd: {
-                macd: macdResult.macd,
-                signal_line: macdResult.signalLine,
-                histogram: macdResult.histogram,
-                signal: macdSignal
-            }
-        }
+    // Build indicators object
+    result.indicators = {
+        rsi: rsiResult,
+        ema: emaResult,
+        macd: macdResult,
+        stochRSI: stochResult,
+        bollingerBands: bbResult,
+        candlePattern: patternResult
     };
+
+    // Calculate total score
+    let totalScore = 0;
+    let baseIndicators = 0;
+    let bonusIndicators = 0;
+
+    // BASE INDICATORS (max 60 points)
+    
+    // RSI (15 points max)
+    if (rsiResult.points > 0) {
+        baseIndicators += rsiResult.points;
+        totalScore += rsiResult.points;
+    }
+
+    // EMA crossover (15 points max)
+    if (emaResult.points > 0) {
+        baseIndicators += emaResult.points;
+        totalScore += emaResult.points;
+    }
+
+    // MACD (15 points max)
+    if (macdResult.points > 0) {
+        baseIndicators += macdResult.points;
+        totalScore += macdResult.points;
+    }
+
+    // Stochastic RSI (15 points max)
+    if (stochResult.points > 0) {
+        baseIndicators += stochResult.points;
+        totalScore += stochResult.points;
+    }
+
+    // BONUS INDICATORS (max 40 points)
+    
+    // Bollinger Bands (10 points)
+    if (bbResult.points > 0) {
+        bonusIndicators += bbResult.points;
+        totalScore += bbResult.points;
+    }
+
+    // Candle pattern (10 points)
+    if (patternResult.points > 0) {
+        bonusIndicators += patternResult.points;
+        totalScore += patternResult.points;
+    }
+
+    // 5min trend alignment (15 points)
+    if (trend5m.bonus > 0) {
+        bonusIndicators += trend5m.bonus;
+        totalScore += trend5m.bonus;
+    }
+
+    // Market session (5 points)
+    const session = filters.isMarketSession();
+    result.filters.marketSession = session.isActive;
+    if (session.bonus > 0) {
+        bonusIndicators += session.bonus;
+        totalScore += session.bonus;
+    }
+
+    // STEP 9: Apply penalties
+
+    // Trend alignment penalty (Rule 3)
+    let trendPenalty = 0;
+    if (result.direction !== 'WAIT') {
+        if (trend5m.trend === 'UPTREND' && result.direction === 'DOWN') {
+            trendPenalty = -15;
+            console.log('[STRATEGY] PENALTY: Signal against 5min UPTREND');
+        } else if (trend5m.trend === 'DOWNTREND' && result.direction === 'UP') {
+            trendPenalty = -15;
+            console.log('[STRATEGY] PENALTY: Signal against 5min DOWNTREND');
+        }
+        totalScore += trendPenalty;
+    }
+
+    // Doji penalty (Rule 6)
+    if (isDoji) {
+        totalScore -= 10;
+        console.log('[STRATEGY] PENALTY: Doji candle detected');
+    }
+
+    // Session penalty for forex outside hours (Rule 8)
+    const sessionPenalty = filters.getSessionPenalty(pair, session.isActive);
+    totalScore += sessionPenalty;
+    if (sessionPenalty < 0) {
+        console.log(`[STRATEGY] PENALTY: Forex outside session (${sessionPenalty})`);
+    }
+
+    // STEP 8: Apply RSI exhaustion blocks (Rule 2)
+    if (exhaustion.status === 'EXHAUSTED_DOWN' && result.direction === 'DOWN') {
+        result.direction = 'WAIT';
+        totalScore = Math.min(totalScore, 50);
+        console.log('[STRATEGY] BLOCKED: RSI exhaustion - DOWN blocked');
+    }
+
+    if (exhaustion.status === 'EXHAUSTED_UP' && result.direction === 'UP') {
+        result.direction = 'WAIT';
+        totalScore = Math.min(totalScore, 50);
+        console.log('[STRATEGY] BLOCKED: RSI exhaustion - UP blocked');
+    }
+
+    // High confidence required for ranging 5min
+    if (trend5m.trend === 'RANGING' && result.direction !== 'WAIT') {
+        if (totalScore < 80) {
+            result.direction = 'WAIT';
+            console.log('[STRATEGY] BLOCKED: Ranging 5min, requires 80+ score');
+        }
+    }
+
+    // STEP 10: Determine final direction and strength
+    // If reversal detected, it overrides
+    if (result.filters.reversalDetected) {
+        // Determine reversal direction
+        const reversal = filters.detectReversal(candles1m, rsiResult.value);
+        if (reversal) {
+            result.direction = reversal;
+            totalScore = Math.min(100, totalScore + 20); // Reversal bonus
+            console.log(`[STRATEGY] REVERSAL OVERRIDE: ${reversal}`);
+        }
+    }
+
+    // Apply consecutive bias filter
+    if (isBiased) {
+        result.direction = 'WAIT';
+        totalScore = Math.min(totalScore, 40);
+        console.log('[STRATEGY] BLOCKED: Consecutive bias (3+ same signals)');
+    }
+
+    // Final direction based on scoring
+    if (result.direction === 'WAIT') {
+        result.strength = 'WAIT';
+    } else if (totalScore >= 75) {
+        result.strength = 'STRONG';
+    } else if (totalScore >= 55) {
+        result.strength = 'WEAK';
+    } else {
+        result.direction = 'WAIT';
+        result.strength = 'WAIT';
+    }
+
+    result.confidence = Math.max(0, Math.min(100, Math.round(totalScore)));
+
+    // Final filter status
+    result.filters = getFilterStatus(candles1m, candles5m, pair);
+
+    // Apply exhaustion status to output
+    if (exhaustion.status !== 'NORMAL') {
+        result.filters.rsiExhaustion = exhaustion.status;
+    }
+
+    console.log(`\n[STRATEGY] FINAL: ${result.direction} | ${result.strength} | ${result.confidence}%`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    // Update state with new signal
+    state.addSignal(pair, {
+        direction: result.direction,
+        strength: result.strength,
+        confidence: result.confidence,
+        timestamp: timestamp
+    });
+
+    return result;
 }
 
 /**
- * Calculate RSI (Relative Strength Index)
- * @param {Array} prices - Array of closing prices
- * @returns {Object} - RSI value and signal
+ * Calculate RSI indicator
+ * @param {Array} prices - Closing prices array
+ * @returns {Object} - RSI result with signal and points
  */
 function calculateRSI(prices) {
     try {
@@ -115,36 +263,45 @@ function calculateRSI(prices) {
         });
 
         const rsiValue = rsiValues[rsiValues.length - 1];
-
         let signal = 'NEUTRAL';
+        let points = 0;
+
+        // UP: RSI < 40 (oversold - expect bounce)
         if (rsiValue < 40) {
             signal = 'UP';
-        } else if (rsiValue > 60) {
+            points = 15;
+        }
+        // DOWN: RSI > 60 (overbought - expect drop)
+        else if (rsiValue > 60) {
             signal = 'DOWN';
+            points = 15;
         }
 
         return {
             value: parseFloat(rsiValue.toFixed(2)),
-            signal: signal
+            signal: signal,
+            points: points
         };
     } catch (error) {
-        console.error('RSI calculation error:', error.message);
-        return { value: null, signal: 'NEUTRAL' };
+        console.error('[STRATEGY] RSI calculation error:', error.message);
+        return { value: null, signal: 'NEUTRAL', points: 0 };
     }
 }
 
 /**
- * Calculate EMA (Exponential Moving Average) - EMA9 and EMA21
- * @param {Array} prices - Array of closing prices
- * @returns {Object} - EMA values and signal
+ * Calculate EMA crossover (EMA9 vs EMA21)
+ * @param {Array} prices - Closing prices array
+ * @returns {Object} - EMA result with signal, crossover flag, and points
  */
 function calculateEMA(prices) {
     try {
+        // Calculate EMA9
         const ema9Values = technicalIndicators.EMA.calculate({
             values: prices,
             period: 9
         });
 
+        // Calculate EMA21
         const ema21Values = technicalIndicators.EMA.calculate({
             values: prices,
             period: 21
@@ -153,28 +310,50 @@ function calculateEMA(prices) {
         const ema9 = ema9Values[ema9Values.length - 1];
         const ema21 = ema21Values[ema21Values.length - 1];
 
+        // Check for crossover (need previous values)
+        let crossover = false;
+        if (ema9Values.length >= 2) {
+            const prevEma9 = ema9Values[ema9Values.length - 2];
+            const prevEma21 = ema21Values[ema21Values.length - 2];
+            
+            // Bullish crossover: was below, now above
+            if (prevEma9 <= prevEma21 && ema9 > ema21) {
+                crossover = true;
+            }
+            // Bearish crossover: was above, now below
+            else if (prevEma9 >= prevEma21 && ema9 < ema21) {
+                crossover = true;
+            }
+        }
+
         let signal = 'NEUTRAL';
+        let points = 0;
+
         if (ema9 > ema21) {
             signal = 'UP';
+            points = crossover ? 15 : 10; // Extra points for crossover
         } else if (ema9 < ema21) {
             signal = 'DOWN';
+            points = crossover ? 15 : 10;
         }
 
         return {
             ema9: parseFloat(ema9.toFixed(5)),
             ema21: parseFloat(ema21.toFixed(5)),
-            signal: signal
+            crossover: crossover,
+            signal: signal,
+            points: points
         };
     } catch (error) {
-        console.error('EMA calculation error:', error.message);
-        return { ema9: null, ema21: null, signal: 'NEUTRAL' };
+        console.error('[STRATEGY] EMA calculation error:', error.message);
+        return { ema9: null, ema21: null, crossover: false, signal: 'NEUTRAL', points: 0 };
     }
 }
 
 /**
- * Calculate MACD (Moving Average Convergence Divergence)
- * @param {Array} prices - Array of closing prices
- * @returns {Object} - MACD, signal line, and signal
+ * Calculate MACD indicator
+ * @param {Array} prices - Closing prices array
+ * @returns {Object} - MACD result with histogram and points
  */
 function calculateMACD(prices) {
     try {
@@ -187,25 +366,271 @@ function calculateMACD(prices) {
             SimpleMASignal: false
         });
 
-        const macdData = macdValues[macdValues.length - 1];
+        if (!macdValues || macdValues.length === 0) {
+            return { macd: null, signal_line: null, histogram: null, histogramRising: false, signal: 'NEUTRAL', points: 0 };
+        }
+
+        const current = macdValues[macdValues.length - 1];
+        const macd = current.MACD;
+        const signalLine = current.signal;
+
+        // Calculate histogram
+        const histogram = macd - signalLine;
+
+        // Check if histogram is increasing
+        let histogramRising = false;
+        if (macdValues.length >= 2) {
+            const prev = macdValues[macdValues.length - 2];
+            const prevHistogram = prev.MACD - prev.signal;
+            histogramRising = histogram > prevHistogram;
+        }
 
         let signal = 'NEUTRAL';
-        if (macdData.MACD > macdData.signal) {
+        let points = 0;
+
+        // UP: MACD > signal line AND histogram increasing
+        if (macd > signalLine) {
             signal = 'UP';
-        } else if (macdData.MACD < macdData.signal) {
+            points = histogramRising ? 15 : 10;
+        }
+        // DOWN: MACD < signal line AND histogram decreasing
+        else if (macd < signalLine) {
             signal = 'DOWN';
+            points = !histogramRising ? 15 : 10;
         }
 
         return {
-            macd: parseFloat(macdData.MACD.toFixed(5)),
-            signalLine: parseFloat(macdData.signal.toFixed(5)),
-            histogram: parseFloat((macdData.MACD - macdData.signal).toFixed(5)),
-            signal: signal
+            macd: parseFloat(macd.toFixed(5)),
+            signal_line: parseFloat(signalLine.toFixed(5)),
+            histogram: parseFloat(histogram.toFixed(5)),
+            histogramRising: histogramRising,
+            signal: signal,
+            points: points
         };
     } catch (error) {
-        console.error('MACD calculation error:', error.message);
-        return { macd: null, signalLine: null, histogram: null, signal: 'NEUTRAL' };
+        console.error('[STRATEGY] MACD calculation error:', error.message);
+        return { macd: null, signal_line: null, histogram: null, histogramRising: false, signal: 'NEUTRAL', points: 0 };
     }
+}
+
+/**
+ * Calculate Stochastic RSI indicator
+ * @param {Array} prices - Closing prices array
+ * @returns {Object} - Stochastic RSI result with K, D and points
+ */
+function calculateStochasticRSI(prices) {
+    try {
+        const stochRSIValues = technicalIndicators.StochasticRSI.calculate({
+            values: prices,
+            period: 14,
+            smoothK: 3,
+            smoothD: 3
+        });
+
+        if (!stochRSIValues || stochRSIValues.length === 0) {
+            return { k: null, d: null, signal: 'NEUTRAL', points: 0 };
+        }
+
+        const current = stochRSIValues[stochRSIValues.length - 1];
+        const k = current.k;
+        const d = current.d;
+
+        let signal = 'NEUTRAL';
+        let points = 0;
+
+        // UP: K < 20 (oversold)
+        if (k < 20) {
+            signal = 'UP';
+            points = 15;
+        }
+        // DOWN: K > 80 (overbought)
+        else if (k > 80) {
+            signal = 'DOWN';
+            points = 15;
+        }
+
+        return {
+            k: parseFloat(k.toFixed(2)),
+            d: parseFloat(d.toFixed(2)),
+            signal: signal,
+            points: points
+        };
+    } catch (error) {
+        console.error('[STRATEGY] Stochastic RSI calculation error:', error.message);
+        return { k: null, d: null, signal: 'NEUTRAL', points: 0 };
+    }
+}
+
+/**
+ * Calculate Bollinger Bands indicator
+ * @param {Array} prices - Closing prices array
+ * @returns {Object} - Bollinger Bands result with position and points
+ */
+function calculateBollingerBands(prices) {
+    try {
+        const bbValues = technicalIndicators.BollingerBands.calculate({
+            values: prices,
+            period: 20,
+            stdDev: 2
+        });
+
+        if (!bbValues || bbValues.length === 0) {
+            return { upper: null, middle: null, lower: null, position: null, signal: 'NEUTRAL', points: 0 };
+        }
+
+        const current = bbValues[bbValues.length - 1];
+        const latestPrice = prices[prices.length - 1];
+
+        // Calculate position: 0 = at lower band, 100 = at upper band
+        const bandRange = current.upper - current.lower;
+        const position = bandRange > 0 ? ((latestPrice - current.lower) / bandRange) * 100 : 50;
+
+        let signal = 'NEUTRAL';
+        let points = 0;
+
+        // UP: Price near/below lower band
+        if (position < 20) {
+            signal = 'UP';
+            points = 10;
+        }
+        // DOWN: Price near/above upper band
+        else if (position > 80) {
+            signal = 'DOWN';
+            points = 10;
+        }
+
+        return {
+            upper: parseFloat(current.upper.toFixed(5)),
+            middle: parseFloat(current.middle.toFixed(5)),
+            lower: parseFloat(current.lower.toFixed(5)),
+            position: parseFloat(position.toFixed(2)),
+            signal: signal,
+            points: points
+        };
+    } catch (error) {
+        console.error('[STRATEGY] Bollinger Bands calculation error:', error.message);
+        return { upper: null, middle: null, lower: null, position: null, signal: 'NEUTRAL', points: 0 };
+    }
+}
+
+/**
+ * Detect candlestick patterns
+ * @param {Array} candles - Array of candle objects
+ * @returns {Object} - Pattern detection result
+ */
+function detectCandlePattern(candles) {
+    try {
+        if (!candles || candles.length < 2) {
+            return { pattern: 'NONE', signal: 'NEUTRAL', points: 0 };
+        }
+
+        const current = candles[candles.length - 1];
+        const previous = candles[candles.length - 2];
+
+        const currentBody = Math.abs(current.close - current.open);
+        const currentUpperWick = current.high - Math.max(current.open, current.close);
+        const currentLowerWick = Math.min(current.open, current.close) - current.low;
+        const currentRange = current.high - current.low;
+
+        const prevBody = Math.abs(previous.close - previous.open);
+        const prevGreen = previous.close > previous.open;
+        const currentGreen = current.close > current.open;
+
+        let pattern = 'NONE';
+        let signal = 'NEUTRAL';
+        let points = 0;
+
+        // Hammer: lower wick > 2x body, small upper wick
+        if (currentLowerWick > currentBody * 2 && currentUpperWick < currentBody * 0.5 && currentRange > 0) {
+            pattern = 'HAMMER';
+            signal = 'UP';
+            points = 10;
+        }
+        // Shooting Star: upper wick > 2x body, small lower wick
+        else if (currentUpperWick > currentBody * 2 && currentLowerWick < currentBody * 0.5 && currentRange > 0) {
+            pattern = 'SHOOTING_STAR';
+            signal = 'DOWN';
+            points = 10;
+        }
+        // Bullish Engulfing: current green body > previous red body
+        else if (currentGreen && !prevGreen && currentBody > prevBody && current.close > previous.open && current.open < previous.close) {
+            pattern = 'BULLISH_ENGULFING';
+            signal = 'UP';
+            points = 10;
+        }
+        // Bearish Engulfing: current red body > previous green body
+        else if (!currentGreen && prevGreen && currentBody > prevBody && current.open > previous.close && current.close < previous.open) {
+            pattern = 'BEARISH_ENGULFING';
+            signal = 'DOWN';
+            points = 10;
+        }
+        // Doji: body < 10% of range
+        else if (currentRange > 0 && currentBody / currentRange < 0.10) {
+            pattern = 'DOJI';
+            signal = 'NEUTRAL';
+            points = 0;
+        }
+
+        return { pattern, signal, points };
+    } catch (error) {
+        console.error('[STRATEGY] Candle pattern detection error:', error.message);
+        return { pattern: 'NONE', signal: 'NEUTRAL', points: 0 };
+    }
+}
+
+/**
+ * Creates empty signal object with defaults
+ * @param {string} pair - Trading pair
+ * @param {string} timestamp - ISO timestamp
+ * @returns {Object} - Empty signal object
+ */
+function createEmptySignal(pair, timestamp) {
+    return {
+        direction: 'WAIT',
+        strength: 'WAIT',
+        confidence: 0,
+        indicators: {
+            rsi: { value: null, signal: 'NEUTRAL', points: 0 },
+            ema: { ema9: null, ema21: null, crossover: false, signal: 'NEUTRAL', points: 0 },
+            macd: { macd: null, signal_line: null, histogram: null, histogramRising: false, signal: 'NEUTRAL', points: 0 },
+            stochRSI: { k: null, d: null, signal: 'NEUTRAL', points: 0 },
+            bollingerBands: { upper: null, middle: null, lower: null, position: null, signal: 'NEUTRAL', points: 0 },
+            candlePattern: { pattern: 'NONE', signal: 'NEUTRAL', points: 0 }
+        },
+        filters: {
+            marketSession: false,
+            trend5m: 'RANGING',
+            isRanging: false,
+            reversalDetected: false,
+            consecutiveBias: false
+        },
+        timestamp: timestamp,
+        pair: pair
+    };
+}
+
+/**
+ * Gets comprehensive filter status
+ * @param {Array} candles1m - 1-minute candles
+ * @param {Array} candles5m - 5-minute candles
+ * @param {string} pair - Trading pair
+ * @returns {Object} - Filter status object
+ */
+function getFilterStatus(candles1m, candles5m, pair) {
+    const session = filters.isMarketSession();
+    const ranging = filters.detectRangingMarket(candles1m);
+    const trend = filters.getMarketTrend5m(candles5m);
+    const reversal = filters.detectReversal(candles1m, null);
+    const bias = filters.checkConsecutiveBias(pair, 'UP', state) || 
+                 filters.checkConsecutiveBias(pair, 'DOWN', state);
+
+    return {
+        marketSession: session.isActive,
+        trend5m: trend.trend,
+        isRanging: ranging.isRanging,
+        reversalDetected: !!reversal,
+        consecutiveBias: !!bias
+    };
 }
 
 module.exports = { generateSignal };

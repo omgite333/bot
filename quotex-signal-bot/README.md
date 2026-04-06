@@ -1,158 +1,195 @@
 # Quotex Signal Bot
 
-A web application that provides continuous trading signals (UP/DOWN) every 1 minute for Quotex trading platform using technical analysis indicators.
+A professional trading signal generator for Quotex platform using pure technical analysis strategies - no AI, no machine learning.
 
-## 📊 Features
+![Quotex Signal Bot](https://img.shields.io/badge/version-1.0.0-blue)
+![Node.js](https://img.shields.io/badge/node-%3E%3D14.0.0-green)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
-- Real-time trading signals based on RSI, EMA, and MACD indicators
-- Support for 10 major trading pairs (Forex and Crypto)
-- Confidence scoring system
-- Visual indicators breakdown
-- Signal history tracking
-- Automatic 60-second updates
+## 🚀 Features
 
-## 🔧 Tech Stack
+- **6 Technical Indicators**: RSI, EMA Crossover, MACD, Stochastic RSI, Bollinger Bands, Candlestick Patterns
+- **Multi-Timeframe Analysis**: Combines 1-minute and 5-minute data
+- **8 Accuracy Rules**: Anti-bias filters to maximize signal quality
+- **Real-Time Updates**: Automatic signal refresh every 60 seconds
+- **10 Trading Pairs**: Major Forex pairs + Bitcoin and Ethereum
+- **Dark Trading Theme**: Professional UI optimized for traders
+
+## 📊 Supported Trading Pairs
+
+| Pair | Type | Symbol |
+|------|------|--------|
+| EUR/USD | Forex | EUR/USD |
+| GBP/USD | Forex | GBP/USD |
+| USD/JPY | Forex | USD/JPY |
+| AUD/USD | Forex | AUD/USD |
+| EUR/GBP | Forex | EUR/GBP |
+| USD/CAD | Forex | USD/CAD |
+| EUR/JPY | Forex | EUR/JPY |
+| BTC/USD | Crypto | BTC/USD |
+| ETH/USD | Crypto | ETH/USD |
+| EUR/USD (OTC) | Forex | EUR/USD |
+
+## 🛠️ Tech Stack
 
 - **Backend**: Node.js + Express
-- **Indicators**: technicalindicators (RSI, EMA, MACD)
-- **Data Source**: Twelve Data API
-- **Frontend**: HTML + CSS + Vanilla JavaScript
+- **Indicators**: technicalindicators (RSI, EMA, MACD, StochRSI, Bollinger Bands)
+- **Data Source**: Twelve Data API (free tier - 500 requests/day)
+- **Frontend**: HTML5 + CSS3 + Vanilla JavaScript
 
-## 🚀 Setup Instructions
+## ⚡ Quick Start
 
 ### Prerequisites
 
-- Node.js (v14 or higher)
-- Twelve Data API key (free tier)
+- Node.js v14 or higher
+- Twelve Data API key (free at [twelvedata.com](https://twelvedata.com) - no credit card required)
 
 ### Installation
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+```bash
+# 1. Install dependencies
+npm install
 
-2. **Create environment file:**
-   ```bash
-   cp .env.example .env
-   ```
+# 2. Create environment file
+cp .env.example .env
 
-3. **Configure your API key:**
-   - Get a free API key from [twelvedata.com](https://twelvedata.com)
-   - Edit `.env` and replace `your_key_here` with your actual API key:
-   ```
-   TWELVE_DATA_API_KEY=your_actual_api_key_here
-   ```
+# 3. Add your API key to .env
+# Edit .env and replace 'your_key_here' with your actual API key:
+TWELVE_DATA_API_KEY=your_actual_api_key_here
 
-4. **Start the server:**
-   ```bash
-   npm start
-   ```
-   Or for development with auto-reload:
-   ```bash
-   npm run dev
-   ```
+# 4. Start the server
+npm start
 
-5. **Open the frontend:**
-   - Open `frontend/index.html` in your browser
-   - Or navigate to `http://localhost:3000` after starting the server
+# 5. Open frontend in browser
+# Navigate to: frontend/index.html
+# Or visit: http://localhost:3000
+```
 
-## 📱 How to Use
+For development with auto-reload:
+```bash
+npm run dev
+```
+
+## 📖 How To Use
 
 1. **Select a trading pair** from the dropdown menu
 2. **Click START** to begin receiving signals
-3. **Wait for the signal** - the bot will fetch and display signals
-4. **Follow the signal** - UP (green) or DOWN (red)
-5. **Click STOP** to stop the bot
+3. **Wait for the signal** - the bot fetches and analyzes data automatically
+4. **Follow the signal**:
+   - ⬆ **UP** (Green) - Consider buying CALL option
+   - ⬇ **DOWN** (Red) - Consider buying PUT option
+   - ⏸ **WAIT** (Yellow) - No clear signal, wait for next update
+5. **Check signal strength**:
+   - **STRONG** (75+ score) - High confidence, recommended
+   - **WEAK** (55-74 score) - Lower confidence, trade with caution
+6. **Click STOP** to stop the bot
 
-### Signal Interpretation
+## 📈 Strategy Explained
 
-- **UP (Green)**: Indicates a potential upward price movement - consider buying CALL
-- **DOWN (Red)**: Indicates a potential downward price movement - consider buying PUT
-- **WAIT (Yellow)**: No clear signal - wait for the next update
+### Indicators Used
 
-### Confidence Level
+1. **RSI (Relative Strength Index)** - Period 14
+   - Oversold (<40) = Potential UP signal
+   - Overbought (>60) = Potential DOWN signal
 
-- **66-100%**: High confidence - 2-3 indicators agree
-- **33-65%**: Medium confidence - mixed signals
-- **0-32%**: Low confidence - indicators disagree
+2. **EMA Crossover (9/21)**
+   - EMA9 above EMA21 = Bullish crossover
+   - EMA9 below EMA21 = Bearish crossover
 
-## 📈 Strategy Explanation
+3. **MACD (12/26/9)**
+   - MACD line above signal line = Bullish momentum
+   - MACD line below signal line = Bearish momentum
 
-The bot uses three technical indicators to generate signals:
+4. **Stochastic RSI**
+   - K < 20 = Oversold (potential bounce)
+   - K > 80 = Overbought (potential drop)
 
-### RSI (Relative Strength Index)
-- **Period**: 14
-- **UP Signal**: RSI < 40 (oversold condition)
-- **DOWN Signal**: RSI > 60 (overbought condition)
+5. **Bollinger Bands (20,2)**
+   - Price near lower band = Potential support/UP
+   - Price near upper band = Potential resistance/DOWN
 
-### EMA (Exponential Moving Average)
-- **Periods**: 9 and 21
-- **UP Signal**: EMA9 > EMA21 (bullish crossover)
-- **DOWN Signal**: EMA9 < EMA21 (bearish crossover)
+6. **Candlestick Patterns**
+   - Hammer = Bullish reversal
+   - Shooting Star = Bearish reversal
+   - Bullish Engulfing = Strong bullish pattern
+   - Bearish Engulfing = Strong bearish pattern
 
-### MACD (Moving Average Convergence Divergence)
-- **Settings**: Fast 12, Slow 26, Signal 9
-- **UP Signal**: MACD line > Signal line
-- **DOWN Signal**: MACD line < Signal line
+### Confidence Scoring (out of 100)
 
-### Confidence Calculation
-- Each agreeing indicator adds points (RSI: 33, EMA: 33, MACD: 34)
-- 3 indicators agree = 100% confidence
-- 2 indicators agree = 66% confidence
-- Fewer than 2 agree = No signal (WAIT)
+**Base Indicators (60 points max)**
+- RSI confirms direction: +15 points
+- EMA crossover confirms: +15 points
+- MACD confirms + histogram correct: +15 points
+- Stochastic RSI confirms: +15 points
 
-## 🔗 Supported Trading Pairs
+**Bonus Indicators (40 points max)**
+- Bollinger Band position: +10 points
+- Candlestick pattern detected: +10 points
+- 5-minute trend aligns with signal: +15 points
+- Active market session: +5 points
 
-1. EUR/USD
-2. GBP/USD
-3. USD/JPY
-4. AUD/USD
-5. EUR/GBP
-6. USD/CAD
-7. EUR/JPY
-8. BTC/USD
-9. ETH/USD
-10. EUR/USD (OTC)
+### 8 Accuracy Rules
+
+1. **Consecutive Bias Prevention**: Blocks signal if 3+ same direction signals in a row
+2. **RSI Exhaustion**: RSI <25 blocks DOWN, RSI >75 blocks UP
+3. **Trend Alignment**: Signals should align with 5-minute trend
+4. **Ranging Market Block**: No signals when Bollinger Band width <0.1%
+5. **Reversal Priority**: Reversal patterns override normal signals
+6. **Doji Candle Block**: No signals on doji candles (market indecision)
+7. **Minimum Data**: Requires 30+ candles for reliable calculation
+8. **Session Filter**: Forex outside sessions gets -15 penalty
+
+## 🌐 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/pairs` | GET | List all supported trading pairs |
+| `/signal?pair=EURUSD` | GET | Generate trading signal |
+| `/history?pair=EURUSD` | GET | Get signal history (last 10) |
+| `/health` | GET | Health check endpoint |
+| `/state` | GET | Debug state information |
 
 ## ⚠️ Disclaimer
 
 **IMPORTANT**: This tool is for educational and informational purposes only.
 
-- Trading signals do not guarantee profitable results
+- Trading signals do NOT guarantee profitable results
 - Past performance is not indicative of future results
-- Always do your own research before making trading decisions
-- Trade responsibly and only risk what you can afford to lose
-- The bot does not replace professional financial advice
+- Always conduct your own research before trading
+- Only risk capital you can afford to lose
+- This is not financial advice
 
-## 📝 API Endpoints
+## 💡 Tips For Best Results
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/pairs` | GET | Returns list of supported trading pairs |
-| `/signal?pair=EURUSD` | GET | Returns trading signal for specified pair |
+1. **Use during active market sessions** (London: 07:00-16:00 UTC, New York: 13:00-21:00 UTC)
+2. **Trust STRONG signals** (75+ confidence) over WEAK signals
+3. **Never trade WAIT signals** - wait for clear direction
+4. **Always test on a demo account first**
+5. **Use proper risk management** - never risk more than 1-2% per trade
+6. **Crypto pairs can be traded 24/7** - forex pairs have optimal times
 
-## 🛠️ Troubleshooting
+## 🐛 Troubleshooting
 
-### Common Issues
-
-**"Failed to fetch candle data"**
-- Check your Twelve Data API key
-- Verify your API quota hasn't been exceeded
+### "Failed to fetch candle data"
+- Check your Twelve Data API key is correct
+- Verify you haven't exceeded your API quota (500 requests/day on free tier)
 - Ensure you have an active internet connection
 
-**"Failed to load trading pairs"**
+### "Failed to load pairs"
 - Make sure the backend server is running on port 3000
-- Check if CORS is properly configured
+- Check if any other process is using port 3000
 
-**No signals appearing**
+### No signals appearing
 - Verify you selected a trading pair
-- Check browser console for errors
+- Check browser console (F12) for errors
+- Try refreshing the page
 
-## 📄 License
+## 📝 License
 
-MIT License - Feel free to use and modify for your own projects.
+MIT License - Free to use and modify.
 
 ---
 
-Built with ❤️ for traders
+Built with ❤️ for traders who want data-driven signals without AI complexity.
+
+**Remember**: Always trade responsibly!

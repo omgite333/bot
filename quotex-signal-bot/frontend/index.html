@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotex Signal Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🤖 QUOTEX SIGNAL BOT</h1>
+            <p class="subtitle">Technical Analysis Trading Signals</p>
+        </header>
+
+        <div class="controls">
+            <div class="select-wrapper">
+                <label for="pairSelect">Trading Pair</label>
+                <select id="pairSelect">
+                    <option value="">Select a pair...</option>
+                </select>
+            </div>
+            <div class="button-group">
+                <button id="startBtn" class="btn btn-start">▶ START</button>
+                <button id="stopBtn" class="btn btn-stop" disabled>⏹ STOP</button>
+            </div>
+        </div>
+
+        <div class="signal-display" id="signalDisplay">
+            <div class="signal-box" id="signalBox">
+                <span id="signalText">WAIT</span>
+            </div>
+            <div class="confidence-container">
+                <label>Confidence: <span id="confidenceValue">0%</span></label>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="confidenceFill"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="timer-section">
+            <div class="timer-box">
+                <span class="timer-label">Next signal in:</span>
+                <span class="timer-value" id="countdown">0:00</span>
+            </div>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span id="statusText">Idle</span>
+            </div>
+        </div>
+
+        <div class="indicators-section">
+            <h2>📊 Indicators Breakdown</h2>
+            <div class="indicators-grid">
+                <div class="indicator-card" id="rsiCard">
+                    <div class="indicator-header">
+                        <span class="indicator-name">RSI (14)</span>
+                        <span class="indicator-status" id="rsiStatus">❌</span>
+                    </div>
+                    <div class="indicator-value" id="rsiValue">--</div>
+                    <div class="indicator-detail" id="rsiDetail">Waiting...</div>
+                </div>
+                <div class="indicator-card" id="emaCard">
+                    <div class="indicator-header">
+                        <span class="indicator-name">EMA (9/21)</span>
+                        <span class="indicator-status" id="emaStatus">❌</span>
+                    </div>
+                    <div class="indicator-value" id="emaValue">--</div>
+                    <div class="indicator-detail" id="emaDetail">Waiting...</div>
+                </div>
+                <div class="indicator-card" id="macdCard">
+                    <div class="indicator-header">
+                        <span class="indicator-name">MACD (12/26/9)</span>
+                        <span class="indicator-status" id="macdStatus">❌</span>
+                    </div>
+                    <div class="indicator-value" id="macdValue">--</div>
+                    <div class="indicator-detail" id="macdDetail">Waiting...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="history-section">
+            <h2>📜 Signal History</h2>
+            <div class="table-wrapper">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Pair</th>
+                            <th>Signal</th>
+                            <th>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody">
+                        <tr class="empty-row">
+                            <td colspan="4">No signals yet. Start the bot to see signals.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p>⚠️ Trading signals are for educational purposes only. Trade responsibly.</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

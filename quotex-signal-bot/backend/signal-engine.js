@@ -11,6 +11,8 @@ const state = require('./state');
 
 async function generateFinalSignal(pair) {
     const candles = candleBuilder.getCandles(pair, 100);
+    const dataPoints = candles.length;
+    console.log(`[ENGINE] Generating signal for ${pair} with ${dataPoints} candles`);
     let strategyResult;
     let aiResult;
     let filtersResult;
@@ -18,7 +20,6 @@ async function generateFinalSignal(pair) {
     let confidence;
     let direction;
     let strength;
-    let dataPoints = candles.length;
     if (candles.length === 0) {
         const fallback = generateFallbackSignal(pair);
         return fallback;

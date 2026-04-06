@@ -1,335 +1,213 @@
 /**
- * server.js - Express API Server
- * Handles routes for signals, pairs, and history
+ * server.js - Express + Socket.io Server
+ * Main server with WebSocket connection and real-time signal broadcasting
  */
 
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
-const { fetchMultiTimeframe } = require('./fetcher');
-const { generateSignal } = require('./strategy');
+const { Server } = require('socket.io');
+
+const quotexWS = require('./quotex-ws');
+const candleBuilder = require('./candle-builder');
+const signalEngine = require('./signal-engine');
 const state = require('./state');
 
-// Initialize Express app
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+const SUPPORTED_PAIRS = [
+    { id: 'EURUSD', name: 'EUR/USD', symbol: 'EURUSD' },
+    { id: 'GBPUSD', name: 'GBP/USD', symbol: 'GBPUSD' },
+    { id: 'USDJPY', name: 'USD/JPY', symbol: 'USDJPY' },
+    { id: 'AUDUSD', name: 'AUD/USD', symbol: 'AUDUSD' },
+    { id: 'EURGBP', name: 'EUR/GBP', symbol: 'EURGBP' },
+    { id: 'USDCAD', name: 'USD/CAD', symbol: 'USDCAD' },
+    { id: 'EURJPY', name: 'EUR/JPY', symbol: 'EURJPY' },
+    { id: 'BTCUSD', name: 'BTC/USD', symbol: 'BTCUSD' },
+    { id: 'ETHUSD', name: 'ETH/USD', symbol: 'ETHUSD' },
+    { id: 'EURUSD_OTC', name: 'EUR/USD (OTC)', symbol: 'EURUSD_OTC' }
+];
+
+let activePair = 'EURUSD';
+let isRunning = false;
+let signalLoopInterval = null;
+let currentSignal = null;
+
 app.use(cors());
 app.use(express.json());
 
-// Request logging middleware
-app.use((req, res, next) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.path}`);
-    next();
-});
-
-// Supported trading pairs configuration
-const SUPPORTED_PAIRS = [
-    { id: 'EURUSD', name: 'EUR/USD', symbol: 'EUR/USD', type: 'forex' },
-    { id: 'GBPUSD', name: 'GBP/USD', symbol: 'GBP/USD', type: 'forex' },
-    { id: 'USDJPY', name: 'USD/JPY', symbol: 'USD/JPY', type: 'forex' },
-    { id: 'AUDUSD', name: 'AUD/USD', symbol: 'AUD/USD', type: 'forex' },
-    { id: 'EURGBP', name: 'EUR/GBP', symbol: 'EUR/GBP', type: 'forex' },
-    { id: 'USDCAD', name: 'USD/CAD', symbol: 'USD/CAD', type: 'forex' },
-    { id: 'EURJPY', name: 'EUR/JPY', symbol: 'EUR/JPY', type: 'forex' },
-    { id: 'BTCUSD', name: 'BTC/USD', symbol: 'BTC/USD', type: 'crypto' },
-    { id: 'ETHUSD', name: 'ETH/USD', symbol: 'ETH/USD', type: 'crypto' },
-    { id: 'EURUSDOTC', name: 'EUR/USD (OTC)', symbol: 'EUR/USD', type: 'forex' }
-];
-
-// Map pair IDs to API symbols
-const PAIR_SYMBOL_MAP = {
-    'EURUSD': 'EUR/USD',
-    'GBPUSD': 'GBP/USD',
-    'USDJPY': 'USD/JPY',
-    'AUDUSD': 'AUD/USD',
-    'EURGBP': 'EUR/GBP',
-    'USDCAD': 'USD/CAD',
-    'EURJPY': 'EUR/JPY',
-    'BTCUSD': 'BTC/USD',
-    'ETHUSD': 'ETH/USD',
-    'EURUSDOTC': 'EUR/USD'
-};
-
-// Signal cache (30 second cache)
-const signalCache = new Map();
-const CACHE_DURATION = 30000; // 30 seconds
-
-/**
- * Returns if cached signal is still valid
- * @param {string} pair - Trading pair
- * @returns {Object|null} - Cached signal or null
- */
-function getCachedSignal(pair) {
-    const cached = signalCache.get(pair);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-        console.log(`[SERVER] Returning cached signal for ${pair}`);
-        return cached.data;
-    }
-    return null;
-}
-
-/**
- * Caches a signal
- * @param {string} pair - Trading pair
- * @param {Object} data - Signal data
- */
-function setCachedSignal(pair, data) {
-    signalCache.set(pair, {
-        data: data,
-        timestamp: Date.now()
-    });
-}
-
-// ============================================
-// ROUTES
-// ============================================
-
-/**
- * GET /pairs
- * Returns list of supported trading pairs
- */
 app.get('/pairs', (req, res) => {
-    try {
-        const pairsList = SUPPORTED_PAIRS.map(pair => ({
-            id: pair.id,
-            name: pair.name,
-            type: pair.type
-        }));
-        
-        res.json({
-            success: true,
-            pairs: pairsList
-        });
-    } catch (error) {
-        console.error('[SERVER] Error fetching pairs:', error.message);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to fetch pairs' 
-        });
-    }
+    res.json({
+        success: true,
+        pairs: SUPPORTED_PAIRS
+    });
 });
 
-/**
- * GET /signal
- * Generates trading signal for specified pair
- * Query params: pair (required)
- */
 app.get('/signal', async (req, res) => {
     try {
         const { pair } = req.query;
-
-        // Validate pair parameter
-        if (!pair) {
-            return res.status(400).json({
-                success: false,
-                error: 'Pair parameter is required. Example: /signal?pair=EURUSD'
-            });
-        }
-
-        // Find pair config
-        const pairConfig = SUPPORTED_PAIRS.find(p => p.id === pair);
-        if (!pairConfig) {
-            return res.status(400).json({
-                success: false,
-                error: `Invalid pair. Valid pairs: ${SUPPORTED_PAIRS.map(p => p.id).join(', ')}`
-            });
-        }
-
-        // Check cache first
-        const cached = getCachedSignal(pair);
-        if (cached) {
-            return res.json({
-                success: true,
-                cached: true,
-                ...cached
-            });
-        }
-
-        console.log(`[SERVER] Generating signal for ${pairConfig.name}`);
-
-        // Get API symbol
-        const symbol = PAIR_SYMBOL_MAP[pair] || pair;
-
-        // Fetch multi-timeframe candles
-        const candleData = await fetchMultiTimeframe(symbol);
-
-        // Check if we have at least 1m candles
-        if (!candleData.candles1m) {
-            return res.status(503).json({
-                success: false,
-                error: 'Unable to fetch candle data. Check API key and quota.',
-                direction: 'WAIT',
-                strength: 'WAIT',
-                confidence: 0
-            });
-        }
-
-        // Generate signal
-        const signal = generateSignal(
-            candleData.candles1m,
-            candleData.candles5m,
-            pairConfig.name
-        );
-
-        // Cache the signal
-        setCachedSignal(pair, signal);
-
-        // Return response
+        const targetPair = pair || activePair;
+        const signal = await signalEngine.generateFinalSignal(targetPair);
+        state.addSignal(targetPair, signal);
         res.json({
             success: true,
-            cached: false,
-            ...signal
+            signal
         });
     } catch (error) {
-        console.error('[SERVER] Error generating signal:', error.message);
+        console.error('[SERVER] Signal error:', error.message);
         res.status(500).json({
             success: false,
-            error: 'Internal server error during signal generation',
-            direction: 'WAIT',
-            strength: 'WAIT',
-            confidence: 0
+            error: error.message
         });
     }
 });
 
-/**
- * GET /history
- * Returns signal history for specified pair
- * Query params: pair (required)
- */
 app.get('/history', (req, res) => {
-    try {
-        const { pair } = req.query;
-
-        if (!pair) {
-            return res.status(400).json({
-                success: false,
-                error: 'Pair parameter is required'
-            });
-        }
-
-        const pairConfig = SUPPORTED_PAIRS.find(p => p.id === pair);
-        if (!pairConfig) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid pair'
-            });
-        }
-
-        const history = state.getHistory(pairConfig.name);
-
-        res.json({
-            success: true,
-            pair: pairConfig.name,
-            history: history
-        });
-    } catch (error) {
-        console.error('[SERVER] Error fetching history:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch history'
-        });
-    }
+    const { pair } = req.query;
+    const targetPair = pair || activePair;
+    const history = state.getHistory(targetPair);
+    res.json({
+        success: true,
+        pair: targetPair,
+        history
+    });
 });
 
-/**
- * GET /state
- * Returns current state data (for debugging)
- */
-app.get('/state', (req, res) => {
-    try {
-        const allState = state.getAllState();
-        res.json({
-            success: true,
-            ...allState
-        });
-    } catch (error) {
-        console.error('[SERVER] Error fetching state:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch state'
-        });
-    }
+app.get('/status', (req, res) => {
+    const wsStatus = quotexWS.getConnectionStatus();
+    const candleData = candleBuilder.getCandleData();
+    res.json({
+        success: true,
+        wsStatus,
+        candleCount: candleData[activePair] || 0,
+        activePair,
+        isRunning
+    });
 });
 
-/**
- * GET /health
- * Health check endpoint
- */
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        cacheSize: signalCache.size
+    res.json({ status: 'ok' });
+});
+
+quotexWS.onTick((tick) => {
+    candleBuilder.processTick(tick);
+    const count = candleBuilder.getCandleCount(tick.asset);
+    io.emit('candle_update', { pair: tick.asset, count });
+});
+
+quotexWS.onStatusChange((status) => {
+    io.emit('ws_status', status);
+});
+
+io.on('connection', (socket) => {
+    console.log(`[SOCKET] Client connected: ${socket.id}`);
+    socket.emit('ws_status', quotexWS.getConnectionStatus());
+    if (currentSignal) {
+        socket.emit('signal', currentSignal);
+    }
+    socket.on('change_pair', async (data) => {
+        const newPair = data.pair;
+        if (!SUPPORTED_PAIRS.find(p => p.symbol === newPair)) {
+            socket.emit('error', 'Invalid pair');
+            return;
+        }
+        if (activePair !== newPair) {
+            quotexWS.unsubscribe(activePair);
+            state.resetPair(activePair);
+            activePair = newPair;
+            quotexWS.subscribe(newPair);
+        }
+        socket.emit('ws_status', 'CHANGING_PAIR');
+        setTimeout(async () => {
+            try {
+                const signal = await signalEngine.generateFinalSignal(activePair);
+                state.addSignal(activePair, signal);
+                currentSignal = signal;
+                io.emit('signal', signal);
+            } catch (error) {
+                console.error('[SOCKET] Signal error:', error.message);
+                socket.emit('error', error.message);
+            }
+        }, 2000);
+    });
+    socket.on('disconnect', () => {
+        console.log(`[SOCKET] Client disconnected: ${socket.id}`);
     });
 });
 
-/**
- * GET /
- * API info endpoint
- */
-app.get('/', (req, res) => {
-    res.json({
-        name: 'Quotex Signal Bot API',
-        version: '1.0.0',
-        description: 'Strategy-based trading signal generator',
-        endpoints: {
-            '/pairs': 'GET - List supported trading pairs',
-            '/signal?pair=EURUSD': 'GET - Generate trading signal',
-            '/history?pair=EURUSD': 'GET - Get signal history',
-            '/health': 'GET - Health check',
-            '/state': 'GET - Debug state info'
-        },
-        supportedPairs: SUPPORTED_PAIRS.map(p => p.name)
-    });
+async function generateAndBroadcastSignal() {
+    if (!isRunning) return;
+    try {
+        console.log(`[LOOP] Generating signal for ${activePair}...`);
+        const signal = await signalEngine.generateFinalSignal(activePair);
+        state.addSignal(activePair, signal);
+        currentSignal = signal;
+        io.emit('signal', signal);
+        console.log(`[LOOP] Signal generated: ${signal.direction} (${signal.strength}) - ${signal.confidence}%`);
+    } catch (error) {
+        console.error('[LOOP] Signal generation error:', error.message);
+        io.emit('error', error.message);
+    }
+}
+
+function startSignalLoop() {
+    if (signalLoopInterval) {
+        clearInterval(signalLoopInterval);
+    }
+    isRunning = true;
+    generateAndBroadcastSignal();
+    signalLoopInterval = setInterval(generateAndBroadcastSignal, 60000);
+    console.log('[SERVER] Signal loop started (60s interval)');
+}
+
+function stopSignalLoop() {
+    if (signalLoopInterval) {
+        clearInterval(signalLoopInterval);
+        signalLoopInterval = null;
+    }
+    isRunning = false;
+    console.log('[SERVER] Signal loop stopped');
+}
+
+quotexWS.connect();
+quotexWS.subscribe(activePair);
+
+startSignalLoop();
+
+server.listen(PORT, () => {
+    console.log('\n' + '='.repeat(50));
+    console.log('QUOTEX AI SIGNAL BOT');
+    console.log('='.repeat(50));
+    console.log(`Server running on port ${PORT}`);
+    console.log(`WebSocket connecting to Quotex...`);
+    console.log(`Default pair: ${activePair}`);
+    console.log(`Signal interval: 60 seconds`);
+    console.log(`Socket.io ready for connections`);
+    console.log('='.repeat(50) + '\n');
 });
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        error: `Route not found: ${req.method} ${req.path}`
-    });
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-    console.error('[SERVER] Unhandled error:', err);
-    res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-    });
-});
-
-// ============================================
-// START SERVER
-// ============================================
-
-app.listen(PORT, () => {
-    console.log('\n' + '═'.repeat(50));
-    console.log('🤖 QUOTEX SIGNAL BOT SERVER');
-    console.log('═'.repeat(50));
-    console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🌐 API docs: http://localhost:${PORT}`);
-    console.log(`📊 Supported pairs: ${SUPPORTED_PAIRS.length}`);
-    console.log('═'.repeat(50) + '\n');
-});
-
-// Graceful shutdown
 process.on('SIGTERM', () => {
-    console.log('[SERVER] SIGTERM received, shutting down...');
+    console.log('[SERVER] Shutting down...');
+    stopSignalLoop();
+    quotexWS.disconnect();
     process.exit(0);
 });
 
 process.on('SIGINT', () => {
-    console.log('[SERVER] SIGINT received, shutting down...');
+    console.log('[SERVER] Shutting down...');
+    stopSignalLoop();
+    quotexWS.disconnect();
     process.exit(0);
 });
+
+module.exports = { app, server, io };

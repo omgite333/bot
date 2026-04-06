@@ -3,43 +3,37 @@
  * Manages signal history and consecutive signal tracking
  */
 
-// In-memory storage (no database needed)
-const signalHistory = new Map();      // pair -> array of last 10 signals
-const consecutiveCount = new Map();   // pair -> { direction, count }
+const signalHistory = new Map();
+const consecutiveCount = new Map();
+const lastSignalTime = new Map();
+const MAX_HISTORY = 20;
 
 /**
  * Adds a signal to the history for a given pair
- * Maintains maximum of 10 signals per pair
+ * Maintains maximum of 20 signals per pair
  * @param {string} pair - Trading pair identifier
  * @param {Object} signal - Signal object to add
  */
 function addSignal(pair, signal) {
-    // Initialize array if not exists
     if (!signalHistory.has(pair)) {
         signalHistory.set(pair, []);
     }
-
-    // Get existing history
     const history = signalHistory.get(pair);
-
-    // Add new signal at the beginning
-    history.unshift(signal);
-
-    // Keep only last 10 signals
-    if (history.length > 10) {
+    history.unshift({
+        ...signal,
+        timestamp: signal.timestamp || new Date().toISOString()
+    });
+    if (history.length > MAX_HISTORY) {
         history.pop();
     }
-
-    // Update consecutive count
+    lastSignalTime.set(pair, Date.now());
     updateConsecutive(pair, signal.direction);
-
-    console.log(`[STATE] Signal added for ${pair}: ${signal.direction} (history: ${history.length})`);
 }
 
 /**
  * Gets the signal history for a given pair
  * @param {string} pair - Trading pair identifier
- * @returns {Array} - Array of last 10 signals
+ * @returns {Array} - Array of last 20 signals
  */
 function getHistory(pair) {
     return signalHistory.get(pair) || [];
@@ -62,23 +56,17 @@ function getConsecutiveCount(pair) {
  */
 function updateConsecutive(pair, direction) {
     const current = consecutiveCount.get(pair) || { direction: null, count: 0 };
-
     if (current.direction === direction) {
-        // Same direction - increment count
         consecutiveCount.set(pair, {
             direction: direction,
             count: current.count + 1
         });
     } else {
-        // Direction changed - reset count
         consecutiveCount.set(pair, {
             direction: direction,
             count: 1
         });
     }
-
-    const updated = consecutiveCount.get(pair);
-    console.log(`[STATE] Consecutive for ${pair}: ${updated.direction} x${updated.count}`);
 }
 
 /**
@@ -89,17 +77,54 @@ function updateConsecutive(pair, direction) {
 function resetPair(pair) {
     signalHistory.delete(pair);
     consecutiveCount.delete(pair);
-    console.log(`[STATE] Reset state for ${pair}`);
+    lastSignalTime.delete(pair);
+}
+
+/**
+ * Gets statistics for a pair
+ * @param {string} pair - Trading pair identifier
+ * @returns {Object} - { total, buyCount, sellCount }
+ */
+function getStats(pair) {
+    const history = getHistory(pair);
+    const total = history.length;
+    const buyCount = history.filter(s => s.direction === 'BUY').length;
+    const sellCount = history.filter(s => s.direction === 'SELL').length;
+    return { total, buyCount, sellCount };
+}
+
+/**
+ * Gets last signal timestamp for a pair
+ * @param {string} pair - Trading pair identifier
+ * @returns {number|null} - Timestamp or null
+ */
+function getLastSignalTime(pair) {
+    return lastSignalTime.get(pair) || null;
+}
+
+/**
+ * Gets all history combined from all pairs
+ * @returns {Array} - Combined sorted history
+ */
+function getAllHistory() {
+    const allHistory = [];
+    for (const [pair, history] of signalHistory) {
+        for (const signal of history) {
+            allHistory.push({ ...signal, pair });
+        }
+    }
+    return allHistory
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, MAX_HISTORY);
 }
 
 /**
  * Clears all state data
- * Used for testing or full reset
  */
 function clearAll() {
     signalHistory.clear();
     consecutiveCount.clear();
-    console.log('[STATE] All state cleared');
+    lastSignalTime.clear();
 }
 
 /**
@@ -111,12 +136,10 @@ function getAllState() {
     signalHistory.forEach((value, key) => {
         historyObj[key] = value;
     });
-
     const consecutiveObj = {};
     consecutiveCount.forEach((value, key) => {
         consecutiveObj[key] = value;
     });
-
     return {
         signalHistory: historyObj,
         consecutiveCount: consecutiveObj
@@ -129,6 +152,9 @@ module.exports = {
     getConsecutiveCount,
     updateConsecutive,
     resetPair,
+    getStats,
+    getLastSignalTime,
+    getAllHistory,
     clearAll,
     getAllState
 };
